@@ -7,34 +7,46 @@ import io.quarkus.websockets.next.WebSocketConnector
 import jakarta.inject.Inject
 import picocli.CommandLine
 
-@QuarkusMain
+@QuarkusMain(name = "client")
 @CommandLine.Command
-class Client @Inject constructor(val connector: WebSocketConnector<WsClient>) : Runnable, QuarkusApplication {
-    @CommandLine.Parameters
-    var localPort: Int = -1
+class Client  constructor() : Runnable, QuarkusApplication {
+    @CommandLine.Parameters(index = "0", paramLabel = "PORT", arity = "1", description = ["Port to listen on"])
+    var localPort: Int? = null
 
-    @CommandLine.Option(names = ["--remote-port", "-r"], defaultValue = "443")
-    var remotePort: Int = -1
+    @CommandLine.Option(names = ["--remote-port", "-r"], defaultValue = "443", required = true)
+    var remotePort: Int? = null
+
+    @CommandLine.Option(names = ["--remote-host", "-h"], required = true)
+    var remoteHost: String = "localhost"
 
     @CommandLine.Option(names = ["--domain", "-d"])
-    lateinit var domain: String
+    var domain: String? = null
 
-    @CommandLine.Option(names = ["--secret", "-s"])
+    @CommandLine.Option(names = ["--local-host", "-l"], defaultValue = "localhost")
+    var localHost: String? = null
+
+    @CommandLine.Option(names = ["--secret", "-s"], required = true)
     lateinit var secret: String
 
-    @CommandLine.Option(names = ["--insecure"], defaultValue = "false")
+    @CommandLine.Option(names = ["--insecure"], defaultValue = "false", required = true)
     var insecure: Boolean = false
+
+    @Inject
+    lateinit var connector: WebSocketConnector<WsClient>
 
 
     override fun run() {
 
 
         val scheme = if (insecure) "ws" else "wss"
-        val uri = "$scheme://$domain:$remotePort/"
+        val uri = "$scheme://$remoteHost:$remotePort/"
 
         connector
             .baseUri(uri)
             .pathParam("secret", secret)
+            .customizeOptions { connectOptions, _ ->
+                connectOptions.addHeader("domain", domain)
+            }
             .connectAndAwait()
         Quarkus.waitForExit()
     }

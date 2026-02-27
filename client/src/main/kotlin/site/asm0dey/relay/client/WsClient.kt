@@ -13,23 +13,26 @@ import io.vertx.mutiny.core.buffer.Buffer.buffer
 import io.vertx.mutiny.ext.web.client.WebClient
 import jakarta.inject.Inject
 import jakarta.inject.Singleton
-import picocli.CommandLine
+import picocli.CommandLine.ParseResult
 import site.asm0dey.relay.domain.*
-import site.asm0dey.relay.domain.Control.Payload.ControlAction.*
-import site.asm0dey.relay.domain.Response.Payload
+import site.asm0dey.relay.domain.Control.ControlPayload.ControlAction.*
+import site.asm0dey.relay.domain.Response.ResponsePayload
 import java.lang.reflect.Type
 
 @WebSocketClient(path = "/ws/{secret}")
-class WsClient @Inject constructor(parseResult: CommandLine.ParseResult, vertx: Vertx) {
+@Singleton
+class WsClient @Inject constructor(parseResult: ParseResult, vertx: Vertx) {
 
-    val webClient = WebClient(vertx)
-    val url = "http://localhost:${parseResult.matchedPositional(0).getValue<Int>()}"
+    val webClient = WebClient.create(vertx)
+    val localHost = parseResult.matchedOption("l")?.getValue<String>() ?: "localhost"
+    val localPort = parseResult.matchedPositional(0).getValue<Int>()
+    val url = "http://$localHost:$localPort"
 
     @Suppress("unused")
     @OnBinaryMessage
     suspend fun onMessage(connection: WebSocketClientConnection, message: Envelope) {
         when (val payload = message.payload) {
-            is Control -> when (payload.payload.action) {
+            is Control -> when (payload.value.action) {
                 SHUTDOWN -> Quarkus.asyncExit(0)
                 REGISTER -> TODO()
                 REGISTERED -> TODO()
@@ -41,21 +44,21 @@ class WsClient @Inject constructor(parseResult: CommandLine.ParseResult, vertx: 
             is Error -> TODO()
             is Request -> {
                 message.correlationId
-                val (method, path, query, headers, body, websocketUpgrade) = payload.payload
+                val (method, path, query, headers, body, _) = payload.value
                 var req = webClient
                     .getAbs(url.removeSuffix("/") + "/" + path.removePrefix("/"))
                     .method(valueOf(method))
-                query?.forEach { (k, v) -> req = req.addQueryParam(k, v) }
-                headers?.forEach { (k, v) -> req = req.putHeader(k, v) }
-                val response = req.sendBuffer(buffer(body)).awaitSuspending()
+                query.forEach { (k, v) -> req = req.addQueryParam(k, v) }
+                headers.forEach { (k, v) -> req = req.putHeader(k, v) }
+                val response = (body?.let { req.sendBuffer(buffer(it)) } ?: req.send()).awaitSuspending()
                 connection.sendBinary(
                     Envelope(
                         correlationId = message.correlationId,
                         payload = Response(
-                            Payload(
+                            ResponsePayload(
                                 statusCode = response.statusCode(),
                                 headers = response.headers().entries().associate { it.key to it.value },
-                                body = response.body().bytes
+                                body = response.body()?.bytes
                             )
                         )
                     ).toByteArray()

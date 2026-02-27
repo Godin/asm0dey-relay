@@ -5,7 +5,7 @@ import io.quarkus.runtime.QuarkusApplication
 import io.quarkus.runtime.annotations.QuarkusMain
 
 
-@QuarkusMain
+@QuarkusMain(name = "server")
 object Main: QuarkusApplication {
     @JvmStatic
     fun main(args: Array<String>) {

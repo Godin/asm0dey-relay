@@ -53,14 +53,14 @@ class SocketService() {
 
     }
 
-    suspend fun request(envelope: Envelope, host: String) {
+    suspend fun request(envelope: Envelope, host: String): Envelope {
         val deferred = CompletableDeferred<Envelope>()
         pendingRequests[CorrelationID(envelope.correlationId)] = deferred
         val connection = connections.first { it.userData().get(domainString) == host }
         withTimeout(5000) {
             connection.sendBinary(envelope.toByteArray()).awaitSuspending()
         }
-        withTimeout(10000) {
+        return withTimeout(10000) {
             deferred.await()
         }
     }
@@ -69,7 +69,7 @@ class SocketService() {
     fun onStop(@Observes ev: ShutdownEvent?) {
         val message = Envelope(
             correlationId = UUID.randomUUID().toString(),
-            payload = Control(Control.Payload(Control.Payload.ControlAction.SHUTDOWN))
+            payload = Control(Control.ControlPayload(Control.ControlPayload.ControlAction.SHUTDOWN))
         ).toByteArray()
 
         connections
@@ -81,16 +81,6 @@ class SocketService() {
                 b.await().atMost(Duration.ofSeconds(5))
             }
         pendingRequests.values.forEach { it.completeExceptionally(IllegalStateException("Server is shutting down")) }
-    }
-
-    private fun parseQueryString(connection: WebSocketConnection): Map<String, String> {
-        val query = connection.handshakeRequest().query() ?: return emptyMap()
-        return query.split("&")
-            .mapNotNull { param ->
-                val parts = param.split("=", limit = 2)
-                if (parts.size == 2) parts[0] to parts[1] else null
-            }
-            .toMap()
     }
 
 }

@@ -2,21 +2,12 @@ package site.asm0dey.relay.server
 
 import io.vertx.core.http.HttpServerRequest
 import jakarta.inject.Inject
-import jakarta.ws.rs.DELETE
-import jakarta.ws.rs.GET
-import jakarta.ws.rs.HEAD
-import jakarta.ws.rs.HeaderParam
-import jakarta.ws.rs.OPTIONS
-import jakarta.ws.rs.PATCH
-import jakarta.ws.rs.POST
-import jakarta.ws.rs.PUT
-import jakarta.ws.rs.Path
-import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.*
 import jakarta.ws.rs.core.Context
+import org.jboss.resteasy.reactive.RestResponse
 import site.asm0dey.relay.domain.Envelope
-import site.asm0dey.relay.domain.Request
-import site.asm0dey.relay.domain.Request.Payload
 import java.util.*
+import org.jboss.resteasy.reactive.RestResponse.ResponseBuilder as RestResponseBuilder
 
 @Path("")
 class HttpEndpoint {
@@ -30,9 +21,10 @@ class HttpEndpoint {
     suspend fun get(
         @QueryParam("X-Domain") domain: String?,
         @HeaderParam("X-Domain") domainHeader: String?,
-    ) {
-        val envelope = envelope(null)
-        socketService.request(envelope, extractHost(domain, domainHeader))
+    ): RestResponse<ByteArray?> {
+        val envelope = envelope("GET")
+        val responseEnvelope = socketService.request(envelope, extractHost(domain, domainHeader))
+        return buildResponse(responseEnvelope)
     }
 
     @POST
@@ -40,9 +32,10 @@ class HttpEndpoint {
         @QueryParam("X-Domain") domain: String?,
         @HeaderParam("X-Domain") domainHeader: String?,
         body: ByteArray?
-    ) {
-        val envelope = envelope(body)
-        socketService.request(envelope, extractHost(domain, domainHeader))
+    ): RestResponse<ByteArray?> {
+        val envelope = envelope("POST", body)
+        val responseEnvelope = socketService.request(envelope, extractHost(domain, domainHeader))
+        return buildResponse(responseEnvelope)
     }
 
     @PUT
@@ -50,18 +43,20 @@ class HttpEndpoint {
         @QueryParam("X-Domain") domain: String?,
         @HeaderParam("X-Domain") domainHeader: String?,
         body: ByteArray?
-    ) {
-        val envelope = envelope(body)
-        socketService.request(envelope, extractHost(domain, domainHeader))
+    ): RestResponse<ByteArray?> {
+        val envelope = envelope("PUT", body)
+        val responseEnvelope = socketService.request(envelope, extractHost(domain, domainHeader))
+        return buildResponse(responseEnvelope)
     }
 
     @HEAD
     suspend fun head(
         @QueryParam("X-Domain") domain: String?,
         @HeaderParam("X-Domain") domainHeader: String?,
-    ) {
-        val envelope = envelope(null)
-        socketService.request(envelope, extractHost(domain, domainHeader))
+    ): RestResponse<ByteArray?> {
+        val envelope = envelope("HEAD")
+        val responseEnvelope = socketService.request(envelope, extractHost(domain, domainHeader))
+        return buildResponse(responseEnvelope)
     }
 
     @DELETE
@@ -69,18 +64,20 @@ class HttpEndpoint {
         @QueryParam("X-Domain") domain: String?,
         @HeaderParam("X-Domain") domainHeader: String?,
         body: ByteArray?
-    ) {
-        val envelope = envelope(body)
-        socketService.request(envelope, extractHost(domain, domainHeader))
+    ): RestResponse<ByteArray?> {
+        val envelope = envelope("DELETE", body)
+        val responseEnvelope = socketService.request(envelope, extractHost(domain, domainHeader))
+        return buildResponse(responseEnvelope)
     }
 
     @OPTIONS
     suspend fun options(
         @QueryParam("X-Domain") domain: String?,
         @HeaderParam("X-Domain") domainHeader: String?,
-    ) {
-        val envelope = envelope(null)
-        socketService.request(envelope, extractHost(domain, domainHeader))
+    ): RestResponse<ByteArray?> {
+        val envelope = envelope("OPTIONS")
+        val responseEnvelope = socketService.request(envelope, extractHost(domain, domainHeader))
+        return buildResponse(responseEnvelope)
     }
 
     @PATCH
@@ -88,19 +85,22 @@ class HttpEndpoint {
         @QueryParam("X-Domain") domain: String?,
         @HeaderParam("X-Domain") domainHeader: String?,
         body: ByteArray?
-    ) {
-        val envelope = envelope(body)
-        socketService.request(envelope, extractHost(domain, domainHeader))
+    ): RestResponse<ByteArray?> {
+        val envelope = envelope("PATCH", body)
+        val responseEnvelope = socketService.request(envelope, extractHost(domain, domainHeader))
+        return buildResponse(responseEnvelope)
     }
 
-    private fun envelope(body: ByteArray?): Envelope = Envelope(
+    private fun envelope(method: String, body: ByteArray? = null): Envelope = Envelope(
         correlationId = UUID.randomUUID().toString(),
-        payload = Request(
-            Payload(
-                method = "GET",
+        payload = site.asm0dey.relay.domain.Request(
+            site.asm0dey.relay.domain.Request.RequestPayload(
+                method = method,
                 path = request.path(),
-                query = request.query().split('&').map { it.split('=') }.filterNot { it[0] == "X-Domain" }
-                    .associate { it[0] to it[1] },
+                query = request.query()?.let {
+                    it.split('&').map { it.split('=') }.filterNot { it[0] == "X-Domain" }
+                        .associate { it[0] to it[1] }
+                } ?: hashMapOf(),
                 headers = request.headers().entries().filterNot { it.key.startsWith("X-Domain") }
                     .associate { it.key to it.value },
                 body = body
@@ -108,9 +108,28 @@ class HttpEndpoint {
         )
     )
 
+    private fun buildResponse(envelope: Envelope): RestResponse<ByteArray?> {
+        val responsePayload = envelope.payload as? site.asm0dey.relay.domain.Response
+            ?: throw IllegalStateException("Expected Response payload, got ${envelope.payload}")
+        val payload = responsePayload.value
+
+        var builder = RestResponseBuilder.ok<ByteArray?>(payload.body)
+        when (payload.statusCode) {
+            200 -> {}
+            else ->
+                builder =
+                    RestResponseBuilder
+                        .create<ByteArray?>(RestResponse.Status.fromStatusCode(payload.statusCode))
+                        .entity(payload.body)
+        }
+        payload.headers.forEach { (key, value) ->
+            builder = builder.header(key, value)
+        }
+        return builder.build()
+    }
+
 
     private fun extractHost(domain: String?, domainHeader: String?): String =
         (domain ?: domainHeader ?: request.getHeader("Host"))
             ?.substringBefore('.') ?: throw IllegalStateException("No host found")
-
 }
