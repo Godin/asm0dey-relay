@@ -3,9 +3,19 @@ package site.asm0dey.relay.client
 import io.quarkus.runtime.Quarkus
 import io.quarkus.runtime.QuarkusApplication
 import io.quarkus.runtime.annotations.QuarkusMain
+import io.quarkus.websockets.next.WebSocketClientConnection
 import io.quarkus.websockets.next.WebSocketConnector
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.inject.Inject
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import picocli.CommandLine
+import site.asm0dey.relay.domain.Control
+import site.asm0dey.relay.domain.Control.ControlPayload.ControlAction.REGISTER
+import site.asm0dey.relay.domain.Envelope
+import site.asm0dey.relay.domain.toByteArray
+import java.util.*
 
 @QuarkusMain(name = "client")
 @CommandLine.Command
@@ -41,14 +51,39 @@ class Client  constructor() : Runnable, QuarkusApplication {
         val scheme = if (insecure) "ws" else "wss"
         val uri = "$scheme://$remoteHost:$remotePort/"
 
-        connector
+        val connection = connector
             .baseUri(uri)
             .pathParam("secret", secret)
             .customizeOptions { connectOptions, _ ->
                 connectOptions.addHeader("domain", domain)
             }
             .connectAndAwait()
+
+        
+        runBlocking {
+            connection.sendRegister()
+            launch {
+                while (true) {
+                    delay(30000)
+                    val heartbeat = Envelope(
+                        correlationId = UUID.randomUUID().toString(),
+                        payload = Control(Control.ControlPayload(Control.ControlPayload.ControlAction.HEARTBEAT))
+                    )
+                    connection.sendBinary(heartbeat.toByteArray()).awaitSuspending()
+                }
+            }
+        }
+
         Quarkus.waitForExit()
+    }
+
+    private suspend fun WebSocketClientConnection.sendRegister() {
+            val registerMsg = Envelope(
+                correlationId = UUID.randomUUID().toString(),
+                payload = Control(Control.ControlPayload(REGISTER))
+            )
+            sendBinary(registerMsg.toByteArray()).awaitSuspending()
+
     }
 
     override fun run(vararg args: String?): Int {

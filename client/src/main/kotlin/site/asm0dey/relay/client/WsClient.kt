@@ -27,24 +27,39 @@ class WsClient @Inject constructor(parseResult: ParseResult, vertx: Vertx) {
     val localHost = parseResult.matchedOption("l")?.getValue<String>() ?: "localhost"
     val localPort = parseResult.matchedPositional(0).getValue<Int>()
     val url = "http://$localHost:$localPort"
+    lateinit var connection: WebSocketClientConnection
 
     @Suppress("unused")
     @OnBinaryMessage
     suspend fun onMessage(connection: WebSocketClientConnection, message: Envelope) {
+        this.connection = connection
         when (val payload = message.payload) {
             is Control -> when (payload.value.action) {
                 SHUTDOWN -> Quarkus.asyncExit(0)
-                REGISTER -> TODO()
-                REGISTERED -> TODO()
+                REGISTERED -> {
+                    val publicUrl = payload.value.publicUrl
+                    println(publicUrl)
+                }
                 UNREGISTER -> TODO()
-                HEARTBEAT -> TODO()
+                HEARTBEAT -> {
+                    val heartbeatResponse = Envelope(
+                        correlationId = message.correlationId,
+                        payload = Control(Control.ControlPayload(STATUS))
+                    )
+                    connection.sendBinary(heartbeatResponse.toByteArray()).awaitSuspending()
+                }
                 STATUS -> TODO()
+                else -> {}
             }
 
             is Error -> TODO()
             is Request -> {
                 message.correlationId
                 val (method, path, query, headers, body, _) = payload.value
+                val queryStr = if (query.isNotEmpty()) {
+                    "?" + query.entries.joinToString("&") { (k, v) -> "$k=$v" }
+                } else ""
+                println("-> $method $localHost:$localPort$path$queryStr")
                 var req = webClient
                     .getAbs(url.removeSuffix("/") + "/" + path.removePrefix("/"))
                     .method(valueOf(method))

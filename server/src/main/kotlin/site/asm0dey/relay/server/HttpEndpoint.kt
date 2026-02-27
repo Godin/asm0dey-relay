@@ -97,10 +97,15 @@ class HttpEndpoint {
             site.asm0dey.relay.domain.Request.RequestPayload(
                 method = method,
                 path = request.path(),
-                query = request.query()?.let {
-                    it.split('&').map { it.split('=') }.filterNot { it[0] == "X-Domain" }
-                        .associate { it[0] to it[1] }
-                } ?: hashMapOf(),
+                query = request
+                    .query()
+                    ?.split('&')
+                    ?.filterNot { it.startsWith("X-Domain") }
+                    ?.mapNotNull { param ->
+                        val parts = param.split('=', limit = 2)
+                        if (parts.size == 2) parts[0] to parts[1] else null
+                    }
+                    ?.toMap() ?: hashMapOf(),
                 headers = request.headers().entries().filterNot { it.key.startsWith("X-Domain") }
                     .associate { it.key to it.value },
                 body = body
@@ -113,15 +118,9 @@ class HttpEndpoint {
             ?: throw IllegalStateException("Expected Response payload, got ${envelope.payload}")
         val payload = responsePayload.value
 
-        var builder = RestResponseBuilder.ok<ByteArray?>(payload.body)
-        when (payload.statusCode) {
-            200 -> {}
-            else ->
-                builder =
-                    RestResponseBuilder
-                        .create<ByteArray?>(RestResponse.Status.fromStatusCode(payload.statusCode))
-                        .entity(payload.body)
-        }
+        val status = RestResponse.Status.fromStatusCode(payload.statusCode)
+
+        var builder = RestResponseBuilder.create<ByteArray?>(status).entity(payload.body)
         payload.headers.forEach { (key, value) ->
             builder = builder.header(key, value)
         }

@@ -9,6 +9,7 @@ import jakarta.inject.Inject
 import jakarta.inject.Singleton
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeout
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import site.asm0dey.relay.domain.*
 import java.lang.reflect.Type
 import java.time.Duration
@@ -21,8 +22,13 @@ import java.util.concurrent.ConcurrentHashMap
 class SocketService() {
     private val domainString = UserData.TypedKey.forString("domain")
     private val pendingRequests = ConcurrentHashMap<CorrelationID, CompletableDeferred<Envelope>>()
+
+    @Suppress("CdiInjectionPointsInspection")
     @Inject
     private lateinit var connections: OpenConnections
+    
+    @ConfigProperty(name = "relay.main-domain", defaultValue = "domain.example.com")
+    lateinit var mainDomain: String
 
     @OnOpen
     suspend fun onConnect(connection: WebSocketConnection, @PathParam secret: String) {
@@ -32,25 +38,59 @@ class SocketService() {
             }
             return
         }
-        val customDomain: String = connection.handshakeRequest().header("domain") ?: "xxxx"
-        connection.userData().put(domainString, customDomain)
+        val requestedSubdomain = connection.handshakeRequest().header("domain")
+        val subdomain = if (requestedSubdomain.isNullOrEmpty()) generateRandomSubdomain() else requestedSubdomain
+        connection.userData().put(domainString, subdomain)
+    }
+    
+    private fun generateRandomSubdomain(): String {
+        val chars = ('a'..'z') + ('0'..'9')
+        return (1..5)
+            .map { chars.random() }
+            .joinToString("")
     }
 
     @OnBinaryMessage
-    suspend fun onMessage(envelope: Envelope) {
-        val deferred = pendingRequests.remove(CorrelationID(envelope.correlationId))
-        if (deferred != null) {
-            if (envelope.payload !is Response) throw IllegalStateException("Expected response message, got $envelope")
-            deferred.complete(envelope)
+    suspend fun onMessage(connection: WebSocketConnection, envelope: Envelope) {
+        val controlPayload = envelope.payload as? Control
+        if (controlPayload != null) {
+            when (controlPayload.value.action) {
+                Control.ControlPayload.ControlAction.REGISTER -> {
+                    val subdomain = connection.userData().get(domainString) ?: generateRandomSubdomain()
+                    val fullDomain = "$subdomain.$mainDomain"
+                    val response = Envelope(
+                        correlationId = envelope.correlationId,
+                        payload = Control(Control.ControlPayload(
+                            Control.ControlPayload.ControlAction.REGISTERED,
+                            subdomain = subdomain,
+                            publicUrl = fullDomain
+                        ))
+                    )
+                    connection.sendBinary(response.toByteArray()).awaitSuspending()
+                }
+                Control.ControlPayload.ControlAction.HEARTBEAT -> {
+                    val response = Envelope(
+                        correlationId = envelope.correlationId,
+                        payload = Control(Control.ControlPayload(Control.ControlPayload.ControlAction.STATUS))
+                    )
+                    connection.sendBinary(response.toByteArray()).awaitSuspending()
+                }
+                else -> {}
+            }
         } else {
-            when (envelope.payload) {
-                is Control -> TODO()
-                is Error -> TODO()
-                is Request -> throw IllegalStateException("Server is not expected to receiver requests, but got $envelope")
-                is Response -> throw IllegalStateException("Response $envelope is not expected to be received here")
+            val deferred = pendingRequests.remove(CorrelationID(envelope.correlationId))
+            if (deferred != null) {
+                if (envelope.payload !is Response) throw IllegalStateException("Expected response message, got $envelope")
+                deferred.complete(envelope)
+            } else {
+                when (envelope.payload) {
+                    is Control -> {}
+                    is Error -> TODO()
+                    is Request -> throw IllegalStateException("Server is not expected to receiver requests, but got $envelope")
+                    is Response -> throw IllegalStateException("Response $envelope is not expected to be received here")
+                }
             }
         }
-
     }
 
     suspend fun request(envelope: Envelope, host: String): Envelope {
@@ -84,8 +124,6 @@ class SocketService() {
     }
 
 }
-
-private fun UUID.toCorrelationId(): CorrelationID = CorrelationID(toString())
 
 
 @JvmInline
