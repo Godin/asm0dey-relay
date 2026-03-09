@@ -39,15 +39,16 @@ import java.util.*
 
 @QuarkusTest
 @ConnectWireMock
-class FirstTest {
+class FirstTest @Inject constructor(
+    @param:ConfigProperty(name = WireMockConfigKey.PORT)
+    var wiremockPort: Int
+) {
 
     @TestHTTPResource
     lateinit var baseUri: URI
 
     lateinit var wireMock: WireMock
 
-    @ConfigProperty(name = WireMockConfigKey.PORT)
-    lateinit var wiremockPort: Integer
 
     @Produces
     @ApplicationScoped
@@ -99,7 +100,6 @@ class FirstTest {
         wireMock.register(get(urlEqualTo("/")).willReturn(aResponse().withStatus(200).withBody("OK")))
         given()
             .header("X-Domain", "test")
-            .header("Connection", "close")
             .`when`()
             .then()
             .statusCode(200)
@@ -388,7 +388,8 @@ class FirstTest {
             .extract()
             .body()
             .asByteArray()
-        val expectedBytes = this::class.java.classLoader.getResourceAsStream("/__files/my-big-file.bin")!!.readAllBytes();
+        val expectedBytes =
+            this::class.java.classLoader.getResourceAsStream("/__files/my-big-file.bin")!!.readAllBytes();
         assertArrayEquals(expectedBytes, asByteArray)
 
         // Verify transformer was called
