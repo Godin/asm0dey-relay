@@ -12,7 +12,7 @@ jobs:
     name: Run Tests
     runs-on: ubuntu-slim
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: |
             /*
@@ -50,7 +50,7 @@ jobs:
             target: linux-arm64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: |
             /*
@@ -118,7 +118,7 @@ jobs:
         shell: pwsh
         run: git config --global core.protectNTFS false
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: |
             /*
@@ -183,7 +183,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: |
             /*
